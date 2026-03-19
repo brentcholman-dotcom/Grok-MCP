@@ -9,6 +9,16 @@ from xai_sdk.chat import user, system, assistant, image, file
 from xai_sdk.tools import web_search as xai_web_search, x_search as xai_x_search, code_execution
 from .utils import encode_image_to_base64, encode_video_to_base64, build_params, usage_footer, XAI_API_KEY, load_history, save_history
 
+def parse_date(date_str: str) -> datetime:
+    """Parse date string in either YYYY-MM-DD (ISO) or DD-MM-YYYY format."""
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(date_str, fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"Date '{date_str}' doesn't match YYYY-MM-DD or DD-MM-YYYY")
+
+
 mcp = FastMCP(name="Grok MCP Server")
 READONLY = ToolAnnotations(readOnlyHint=True)
 
@@ -530,8 +540,8 @@ async def x_search(
     tool_params = build_params(
         allowed_x_handles=allowed_x_handles,
         excluded_x_handles=excluded_x_handles,
-        from_date=datetime.strptime(from_date, "%d-%m-%Y") if from_date else None,
-        to_date=datetime.strptime(to_date, "%d-%m-%Y") if to_date else None,
+        from_date=parse_date(from_date) if from_date else None,
+        to_date=parse_date(to_date) if to_date else None,
         enable_image_understanding=enable_image_understanding,
         enable_video_understanding=enable_video_understanding,
     )
@@ -681,8 +691,8 @@ async def grok_agent(
         x_params = build_params(
             allowed_x_handles=allowed_x_handles,
             excluded_x_handles=excluded_x_handles,
-            from_date=datetime.strptime(from_date, "%d-%m-%Y") if from_date else None,
-            to_date=datetime.strptime(to_date, "%d-%m-%Y") if to_date else None,
+            from_date=parse_date(from_date) if from_date else None,
+            to_date=parse_date(to_date) if to_date else None,
             enable_image_understanding=enable_image_understanding,
             enable_video_understanding=enable_video_understanding,
         )
