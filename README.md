@@ -88,6 +88,20 @@ Verify it's registered:
 claude mcp list
 ```
 
+### Local file and model policy
+
+Local image, video, and upload paths are restricted by
+`GROK_MCP_ALLOWED_FILE_ROOTS`. Provide an OS path-separated list of directories
+(for example, `/Users/me/Pictures:/private/tmp`). If unset, access is limited
+to the server working directory plus `/private/tmp` and `/tmp`.
+
+The default non-reasoning lane is `grok-4.20-non-reasoning`. Override it by
+role when needed:
+
+- `GROK_MCP_CHAT_MODEL` — chat and stateful chat
+- `GROK_MCP_SEARCH_MODEL` — web/X search and the unified agent
+- `GROK_MCP_TOOL_MODEL` — code execution and file-grounded chat
+
 ### Filesystem MCP (Optional)
 
 Claude Desktop can't send uploaded images in the chat to an MCP tool.

@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
@@ -7,7 +8,22 @@ from mcp.types import ToolAnnotations
 from xai_sdk import Client
 from xai_sdk.chat import user, system, assistant, image, file
 from xai_sdk.tools import web_search as xai_web_search, x_search as xai_x_search, code_execution
-from .utils import encode_image_to_base64, encode_video_to_base64, build_params, usage_footer, XAI_API_KEY, load_history, save_history
+from .utils import (
+    XAI_API_KEY,
+    build_params,
+    encode_image_to_base64,
+    encode_video_to_base64,
+    load_history,
+    resolve_allowed_local_file,
+    save_history,
+    usage_footer,
+)
+
+ALLOWED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
+ALLOWED_VIDEO_SUFFIXES = {".mp4", ".mov", ".mpeg", ".mpg", ".webm"}
+DEFAULT_GROK_SEARCH_MODEL = os.getenv("GROK_MCP_SEARCH_MODEL", "grok-4.20-non-reasoning")
+DEFAULT_GROK_TOOL_MODEL = os.getenv("GROK_MCP_TOOL_MODEL", DEFAULT_GROK_SEARCH_MODEL)
+DEFAULT_GROK_CHAT_MODEL = os.getenv("GROK_MCP_CHAT_MODEL", DEFAULT_GROK_SEARCH_MODEL)
 
 def parse_date(date_str: str) -> datetime:
     """Parse date string in either YYYY-MM-DD (ISO) or DD-MM-YYYY format."""
@@ -30,7 +46,7 @@ READONLY = ToolAnnotations(readOnlyHint=True)
 async def chat(
     prompt: str,
     session: Optional[str] = None,
-    model: str = "grok-4.3",
+    model: str = DEFAULT_GROK_CHAT_MODEL,
     system_prompt: Optional[str] = None,
     agent_count: Optional[int] = None,
     show_usage: bool = False,
@@ -43,7 +59,7 @@ async def chat(
     Args:
         prompt: User message to send to the model.
         session: Optional session name. Loads and appends history to `chats/{session}.json`.
-        model: Grok model id (default `grok-4.3`).
+        model: Grok model id (default `GROK_MCP_CHAT_MODEL`, otherwise `grok-4.20-non-reasoning`).
         system_prompt: Optional system instruction prepended to the conversation.
         agent_count: 4 or 16. Only valid with `grok-4.20-multi-agent` for multi-agent research.
         show_usage: Append a token usage and cost footer to the reply (default False).
@@ -209,8 +225,9 @@ async def generate_image(
     refs = []
     if image_paths:
         for path in image_paths:
-            base64_string = encode_image_to_base64(path)
-            ext = Path(path).suffix.lower().replace('.', '')
+            local_image = resolve_allowed_local_file(path, ALLOWED_IMAGE_SUFFIXES)
+            base64_string = encode_image_to_base64(local_image)
+            ext = local_image.suffix.lower().replace('.', '')
             refs.append(f"data:image/{ext};base64,{base64_string}")
     if image_urls:
         refs.extend(image_urls)
@@ -282,15 +299,17 @@ async def generate_video(
     }
     
     if image_path:
-        base64_string = encode_image_to_base64(image_path)
-        ext = Path(image_path).suffix.lower().replace('.', '')
+        local_image = resolve_allowed_local_file(image_path, ALLOWED_IMAGE_SUFFIXES)
+        base64_string = encode_image_to_base64(local_image)
+        ext = local_image.suffix.lower().replace('.', '')
         params["image_url"] = f"data:image/{ext};base64,{base64_string}"
     elif image_url:
         params["image_url"] = image_url
     
     if video_path:
-        base64_string = encode_video_to_base64(video_path)
-        ext = Path(video_path).suffix.lower().replace('.', '')
+        local_video = resolve_allowed_local_file(video_path, ALLOWED_VIDEO_SUFFIXES)
+        base64_string = encode_video_to_base64(local_video)
+        ext = local_video.suffix.lower().replace('.', '')
         params["video_url"] = f"data:video/{ext};base64,{base64_string}"
     elif video_url:
         params["video_url"] = video_url
@@ -298,8 +317,9 @@ async def generate_video(
     refs = []
     if reference_image_paths:
         for path in reference_image_paths:
-            base64_string = encode_image_to_base64(path)
-            ext = Path(path).suffix.lower().replace('.', '')
+            local_image = resolve_allowed_local_file(path, ALLOWED_IMAGE_SUFFIXES)
+            base64_string = encode_image_to_base64(local_image)
+            ext = local_image.suffix.lower().replace('.', '')
             refs.append(f"data:image/{ext};base64,{base64_string}")
     if reference_image_urls:
         refs.extend(reference_image_urls)
@@ -398,10 +418,9 @@ async def chat_with_vision(
     user_content = []
     if image_paths:
         for path in image_paths:
-            ext = Path(path).suffix.lower().replace('.', '')
-            if ext not in ["jpg", "jpeg", "png"]:
-                raise ValueError(f"Unsupported image type: {ext}")
-            base64_img = encode_image_to_base64(path)
+            local_image = resolve_allowed_local_file(path, ALLOWED_IMAGE_SUFFIXES)
+            ext = local_image.suffix.lower().replace('.', '')
+            base64_img = encode_image_to_base64(local_image)
             user_content.append(image(image_url=f"data:image/{ext};base64,{base64_img}", detail=detail))
 
     if image_urls:
@@ -424,7 +443,7 @@ async def chat_with_vision(
 @mcp.tool(annotations=READONLY)
 async def web_search(
     prompt: str,
-    model: str = "grok-4.3",
+    model: str = DEFAULT_GROK_SEARCH_MODEL,
     allowed_domains: Optional[List[str]] = None,
     excluded_domains: Optional[List[str]] = None,
     enable_image_understanding: bool = False,
@@ -440,7 +459,7 @@ async def web_search(
 
     Args:
         prompt: Search query or research question.
-        model: Grok model used to drive the agent (default `grok-4.3`).
+        model: Grok model used to drive the agent (default `GROK_MCP_SEARCH_MODEL`).
         allowed_domains: Restrict search to these domains (max 5, mutually exclusive with excluded).
         excluded_domains: Exclude these domains from search (max 5).
         enable_image_understanding: Let the agent analyze images it encounters.
@@ -496,7 +515,7 @@ async def web_search(
 @mcp.tool(annotations=READONLY)
 async def x_search(
     prompt: str,
-    model: str = "grok-4.3",
+    model: str = DEFAULT_GROK_SEARCH_MODEL,
     allowed_x_handles: Optional[List[str]] = None,
     excluded_x_handles: Optional[List[str]] = None,
     from_date: Optional[str] = None,
@@ -514,7 +533,7 @@ async def x_search(
 
     Args:
         prompt: Search query or question about X content.
-        model: Grok model driving the agent (default `grok-4.3`).
+        model: Grok model driving the agent (default `GROK_MCP_SEARCH_MODEL`).
         allowed_x_handles: Restrict search to these handles (max 10, mutually exclusive with excluded).
         excluded_x_handles: Exclude these handles (max 10).
         from_date: Inclusive start date as `DD-MM-YYYY`.
@@ -574,7 +593,7 @@ async def x_search(
 @mcp.tool()
 async def code_executor(
     prompt: str,
-    model: str = "grok-4.3",
+    model: str = DEFAULT_GROK_TOOL_MODEL,
     max_turns: Optional[int] = None,
     show_usage: bool = False,
 ):
@@ -585,7 +604,7 @@ async def code_executor(
 
     Args:
         prompt: Task or question requiring computation.
-        model: Grok model driving the agent (default `grok-4.3`).
+        model: Grok model driving the agent (default `GROK_MCP_TOOL_MODEL`).
         max_turns: Cap the number of reasoning/execution turns.
         show_usage: Append a token usage and cost footer to the answer (default False).
 
@@ -617,7 +636,7 @@ async def code_executor(
 async def grok_agent(
     prompt: str,
     session: Optional[str] = None,
-    model: str = "grok-4.3",
+    model: str = DEFAULT_GROK_SEARCH_MODEL,
     file_ids: Optional[List[str]] = None,
     image_urls: Optional[List[str]] = None,
     image_paths: Optional[List[str]] = None,
@@ -648,7 +667,7 @@ async def grok_agent(
     Args:
         prompt: Task or question for the agent.
         session: Optional session name for persistent history in `chats/{session}.json`.
-        model: Grok model driving the agent (default `grok-4.3`).
+        model: Grok model driving the agent (default `GROK_MCP_SEARCH_MODEL`).
         file_ids: IDs of previously uploaded files to attach as context.
         image_urls: Public image URLs to attach.
         image_paths: Local image files to attach (sent as base64 data URIs).
@@ -736,8 +755,9 @@ async def grok_agent(
     
     if image_paths:
         for path in image_paths:
-            ext = Path(path).suffix.lower().replace('.', '')
-            base64_img = encode_image_to_base64(path)
+            local_image = resolve_allowed_local_file(path, ALLOWED_IMAGE_SUFFIXES)
+            ext = local_image.suffix.lower().replace('.', '')
+            base64_img = encode_image_to_base64(local_image)
             content_items.append(image(image_url=f"data:image/{ext};base64,{base64_img}"))
     
     content_items.append(prompt)
@@ -762,7 +782,7 @@ async def grok_agent(
 @mcp.tool()
 async def stateful_chat(
     prompt: str,
-    model: str = "grok-4.3",
+    model: str = DEFAULT_GROK_CHAT_MODEL,
     response_id: Optional[str] = None,
     system_prompt: Optional[str] = None,
     show_usage: bool = False,
@@ -774,7 +794,7 @@ async def stateful_chat(
 
     Args:
         prompt: User message to append.
-        model: Grok model id (default `grok-4.3`).
+        model: Grok model id (default `GROK_MCP_CHAT_MODEL`).
         response_id: ID of the previous response to continue from (omit to start fresh).
         system_prompt: Optional system instruction. Applied only on the first turn.
         show_usage: Append a token usage and cost footer to the reply (default False).
@@ -852,15 +872,13 @@ async def upload_file(file_path: str, expires_after: Optional[int] = None):
     """
     client = Client(api_key=XAI_API_KEY)
 
-    path = Path(file_path)
-    if not path.exists():
-        raise FileNotFoundError(f"File not found {file_path}")
+    path = resolve_allowed_local_file(file_path)
 
     upload_params = {}
     if expires_after:
         upload_params["expires_after"] = expires_after
 
-    uploaded = client.files.upload(file_path, **upload_params)
+    uploaded = client.files.upload(str(path), **upload_params)
     client.close()
 
     result = f"**File uploaded successfully**\n- **File ID:** `{uploaded.id}`\n- **Filename:** {uploaded.filename}\n- **Size:** {uploaded.size} bytes"
@@ -965,7 +983,7 @@ async def chat_with_files(
     prompt: str,
     file_ids: List[str],
     session: Optional[str] = None,
-    model: str = "grok-4.3",
+    model: str = DEFAULT_GROK_TOOL_MODEL,
     system_prompt: Optional[str] = None,
     show_usage: bool = False,
 ):
@@ -978,7 +996,7 @@ async def chat_with_files(
         prompt: Question or instruction about the attached files.
         file_ids: IDs of files previously returned by `upload_file`.
         session: Optional session name for persistent history in `chats/{session}.json`.
-        model: Grok model id (default `grok-4.3`).
+        model: Grok model id (default `GROK_MCP_TOOL_MODEL`).
         system_prompt: Optional system instruction prepended to the conversation.
         show_usage: Append a token usage and cost footer to the reply (default False).
 
